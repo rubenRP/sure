@@ -579,6 +579,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_07_14_120000) do
     t.string "product"
     t.decimal "credit_limit", precision: 19, scale: 4
     t.jsonb "identification_hashes", default: []
+    t.boolean "treat_balance_as_available_credit", default: false, null: false
     t.index ["account_id"], name: "index_enable_banking_accounts_on_account_id"
     t.index ["enable_banking_item_id"], name: "index_enable_banking_accounts_on_enable_banking_item_id"
     t.index ["identification_hashes"], name: "index_enable_banking_accounts_on_identification_hashes", using: :gin
@@ -1404,6 +1405,16 @@ ActiveRecord::Schema[7.2].define(version: 2026_07_14_120000) do
     t.datetime "updated_at", null: false
     t.index ["user_id", "device_id"], name: "index_mobile_devices_on_user_id_and_device_id", unique: true
     t.index ["user_id"], name: "index_mobile_devices_on_user_id"
+  end
+
+  create_table "notification_deliveries", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "rule_id", null: false
+    t.uuid "transaction_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["rule_id", "transaction_id"], name: "index_notification_deliveries_on_rule_and_transaction", unique: true
+    t.index ["rule_id"], name: "index_notification_deliveries_on_rule_id"
+    t.index ["transaction_id"], name: "index_notification_deliveries_on_transaction_id"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
@@ -2295,6 +2306,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_07_14_120000) do
   add_foreign_key "mercury_items", "families"
   add_foreign_key "messages", "chats"
   add_foreign_key "mobile_devices", "users"
+  add_foreign_key "notification_deliveries", "rules", on_delete: :cascade
+  add_foreign_key "notification_deliveries", "transactions", on_delete: :cascade
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "oidc_identities", "users"
