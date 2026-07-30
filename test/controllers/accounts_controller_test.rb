@@ -19,6 +19,31 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "show avoids N+1 transfer queries across paginated entries" do
+    queries = capture_sql_queries { get account_url(@account) }
+    assert_response :success
+
+    # Per-row transfer lookups (N+1 pattern) hit transfers with a single id
+    # Preloading batches them into IN(...) — assert no single-id lookups remain
+    per_row_transfer = queries.count { |q|
+      q.match?(/FROM "transfers".*WHERE.*"(inflow|outflow)_transaction_id"/) &&
+        !q.include?(" IN (")
+    }
+    assert_equal 0, per_row_transfer, "N+1 per-row transfer queries detected (#{per_row_transfer})"
+  end
+
+  test "show avoids N+1 split-parent queries across paginated entries" do
+    queries = capture_sql_queries { get account_url(@account) }
+    assert_response :success
+
+    # Per-row child-entry existence checks (N+1) hit entries with a single parent_entry_id
+    # @split_parent_entry_ids preloads this in one batch IN query
+    per_row_split = queries.count { |q|
+      q.match?(/FROM "entries".*WHERE.*"parent_entry_id"/) && !q.include?(" IN (")
+    }
+    assert_equal 0, per_row_split, "N+1 per-row split-parent queries detected (#{per_row_split})"
+  end
+
   test "show lazily loads statement tab data unless statements tab is active" do
     AccountStatement::Coverage.expects(:for_year).never
     AccountStatement.expects(:reconciliation_statuses_for).never
@@ -433,6 +458,32 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     holding.reload
 
     assert_nil holding.account_provider_id, "Holding should be detached from provider after unlink"
+  end
+
+  # Regression for #2516: the account sidebar fragment cache renders DS::* view
+  # components, which Rails' ERB dependency tracker mis-parses as a bogus "Ds/D"
+  # template dependency. With automatic digesting enabled that logged
+  # "Couldn't find template for digesting: Ds/D" on every cache miss. The
+  # fragment is manually versioned and opts out of digesting via skip_digest.
+  test "sidebar fragment cache does not log a bogus template digest error" do
+    log = StringIO.new
+    logger = ActiveSupport::Logger.new(log)
+
+    original_perform_caching = ActionController::Base.perform_caching
+    original_view_logger = ActionView::Base.logger
+    original_rails_logger = Rails.logger
+
+    ActionController::Base.perform_caching = true
+    ActionView::Base.logger = logger
+    Rails.logger = logger
+
+    get accounts_path
+    assert_response :success
+    assert_no_match(/Couldn't find template for digesting/, log.string)
+  ensure
+    ActionController::Base.perform_caching = original_perform_caching
+    ActionView::Base.logger = original_view_logger
+    Rails.logger = original_rails_logger
   end
 end
 
